@@ -32,6 +32,14 @@ id, object, href, amount_cents (can be negative), memo, date, comments (??), tag
 },]
 """
 
+if not os.path.exists("transactions.json"):
+    with open("transactions.json", "w") as f:
+        json.dump([], f)
+
+if os.path.getsize("transactions.json") == 0:
+    with open("transactions.json", "w") as f:
+        json.dump([], f)
+
 TRANSACTIONS: list[dict] = json.load(open("transactions.json", "r"))
 
 
