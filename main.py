@@ -85,12 +85,16 @@ async def update_transactions():
             if tid
             else "https://hcb.hackclub.com/flavortown"
         )
+        trans_type = t.get("type", "").upper().replace("_", " ")  # type: ignore
+        user = t.get("user", {}).get("full_name", "???")
+        imgfail = "https://images.rawpixel.com/image_png_800/cHJpdmF0ZS9sci9pbWFnZXMvd2Vic2l0ZS8yMDI0LTA0L3JtMTg4OS1lbGVtZW50LXotMzEucG5n.png"
+
         blocks = [
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"<{href}|NEW TRANSACTION> - {date}",
+                    "text": f"*NEW {trans_type}* - {date}",
                 },
             },
             {
@@ -101,10 +105,22 @@ async def update_transactions():
                         "type": "mrkdwn",
                         "text": f"*Balance change*\n${amount:+,.2f}",
                     },
+                    # {
+                    #     "type": "mrkdwn",
+                    #     "text": f"*Tags*\n{tag_labels}",
+                    # },
+                    # tags are added later usually? might figure that out but will require more reworking unfortunately
+                ],
+            },
+            {
+                "type": "context",
+                "elements": [
                     {
-                        "type": "mrkdwn",
-                        "text": f"*Tags*\n{tag_labels}",
+                        "type": "image",
+                        "image_url": t.get("user", {}).get("photo", imgfail),
+                        "alt_text": "user pfp",
                     },
+                    {"type": "mrkdwn", "text": f"By: *{user}* | <{href}|(hcb)>"},
                 ],
             },
         ]
