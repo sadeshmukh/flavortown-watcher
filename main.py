@@ -67,6 +67,7 @@ async def _send_transaction(t: dict):
         if tid
         else f"https://hcb.hackclub.com/{ORG}"
     )
+    hcbscan_href = f"https://hcbscan.3kh0.net/app/txn/{tid}" if tid else None
     trans_type = t.get("type", "").upper().replace("_", " ")  # type: ignore
     user = t.get("user", {}).get("full_name", "???")
     imgfail = "https://images.rawpixel.com/image_png_800/cHJpdmF0ZS9sci9pbWFnZXMvd2Vic2l0ZS8yMDI0LTA0L3JtMTg4OS1lbGVtZW50LXotMzEucG5n.png"
@@ -92,7 +93,10 @@ async def _send_transaction(t: dict):
                     "image_url": t.get("user", {}).get("photo", imgfail),
                     "alt_text": "user pfp",
                 },
-                {"type": "mrkdwn", "text": f"By: *{user}* | <{href}|(hcb)>"},
+                {
+                    "type": "mrkdwn",
+                    "text": f"By: *{user}* | <{href}|hcb> | <{hcbscan_href}|hcbscan>",
+                },
             ],
         },
     ]
