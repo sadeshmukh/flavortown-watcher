@@ -42,11 +42,13 @@ if os.path.getsize("transactions.json") == 0:
 
 TRANSACTIONS: list[dict] = json.load(open("transactions.json", "r"))
 
+ORG = os.getenv("ORG", "flavortown")
+
 
 async def _get_transactions() -> list[dict]:
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            "https://hcb.hackclub.com/api/v3/organizations/flavortown/transactions"
+            f"https://hcb.hackclub.com/api/v3/organizations/{ORG}/transactions"
         ) as resp:
             data = await resp.json()
             return data
@@ -83,7 +85,7 @@ async def update_transactions():
         href = (
             f"https://hcb.hackclub.com/hcb/{tid.split('_')[1]}"
             if tid
-            else "https://hcb.hackclub.com/flavortown"
+            else f"https://hcb.hackclub.com/{ORG}"
         )
         trans_type = t.get("type", "").upper().replace("_", " ")  # type: ignore
         user = t.get("user", {}).get("full_name", "???")
@@ -135,9 +137,8 @@ async def update_transactions():
             ],
         )
 
-    # serialize to transactions.json or sum
     with open("transactions.json", "w") as f:
-        json.dump(TRANSACTIONS, f, indent=2)  # TODO: remove indent
+        json.dump(TRANSACTIONS, f, indent=2)
 
 
 async def poll_loop(interval_seconds: int = 10):
