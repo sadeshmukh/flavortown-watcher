@@ -3,6 +3,7 @@ import json
 import os
 
 import aiohttp
+from aiohttp import web
 from dotenv import load_dotenv
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
@@ -54,6 +55,54 @@ async def _get_transactions() -> list[dict]:
             return data
 
 
+async def _send_transaction(t: dict):
+    memo = t.get("memo") or "—"
+    amount_cents = t.get("amount_cents", 0)
+    amount = amount_cents / 100
+    date = t.get("date", "")
+    color = "#2eb886" if amount_cents >= 0 else "#e01e5a"
+    tid = t.get("id", "")
+    href = (
+        f"https://hcb.hackclub.com/hcb/{tid.split('_')[1]}"
+        if tid
+        else f"https://hcb.hackclub.com/{ORG}"
+    )
+    trans_type = t.get("type", "").upper().replace("_", " ")  # type: ignore
+    user = t.get("user", {}).get("full_name", "???")
+    imgfail = "https://images.rawpixel.com/image_png_800/cHJpdmF0ZS9sci9pbWFnZXMvd2Vic2l0ZS8yMDI0LTA0L3JtMTg4OS1lbGVtZW50LXotMzEucG5n.png"
+
+    blocks = [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*NEW {trans_type}* - {date}"},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Memo*\n{memo}"},
+                {"type": "mrkdwn", "text": f"*Balance change*\n${amount:+,.2f}"},
+                # tags are added later usually? might figure that out but will require more reworking unfortunately
+            ],
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "image",
+                    "image_url": t.get("user", {}).get("photo", imgfail),
+                    "alt_text": "user pfp",
+                },
+                {"type": "mrkdwn", "text": f"By: *{user}* | <{href}|(hcb)>"},
+            ],
+        },
+    ]
+
+    await client.chat_postMessage(
+        channel=CHANNEL_ID,
+        attachments=[{"color": color, "blocks": blocks}],
+    )
+
+
 async def update_transactions():
     tres = await _get_transactions()
     if not tres:
@@ -72,73 +121,23 @@ async def update_transactions():
 
     for t in reversed(new_items):
         TRANSACTIONS.insert(0, t)
-        memo = t.get("memo") or "—"
-        tags = t.get("tags") or []
-        tag_labels = (
-            ", ".join(tag.get("label", "") for tag in tags if tag.get("label")) or "—"
-        )
-        amount_cents = t.get("amount_cents", 0)
-        amount = amount_cents / 100
-        date = t.get("date", "")
-        color = "#2eb886" if amount_cents >= 0 else "#e01e5a"
-        tid = t.get("id", "")
-        href = (
-            f"https://hcb.hackclub.com/hcb/{tid.split('_')[1]}"
-            if tid
-            else f"https://hcb.hackclub.com/{ORG}"
-        )
-        trans_type = t.get("type", "").upper().replace("_", " ")  # type: ignore
-        user = t.get("user", {}).get("full_name", "???")
-        imgfail = "https://images.rawpixel.com/image_png_800/cHJpdmF0ZS9sci9pbWFnZXMvd2Vic2l0ZS8yMDI0LTA0L3JtMTg4OS1lbGVtZW50LXotMzEucG5n.png"
-
-        blocks = [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*NEW {trans_type}* - {date}",
-                },
-            },
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Memo*\n{memo}"},
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Balance change*\n${amount:+,.2f}",
-                    },
-                    # {
-                    #     "type": "mrkdwn",
-                    #     "text": f"*Tags*\n{tag_labels}",
-                    # },
-                    # tags are added later usually? might figure that out but will require more reworking unfortunately
-                ],
-            },
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "image",
-                        "image_url": t.get("user", {}).get("photo", imgfail),
-                        "alt_text": "user pfp",
-                    },
-                    {"type": "mrkdwn", "text": f"By: *{user}* | <{href}|(hcb)>"},
-                ],
-            },
-        ]
-
-        await client.chat_postMessage(
-            channel=CHANNEL_ID,
-            attachments=[
-                {
-                    "color": color,
-                    "blocks": blocks,
-                }
-            ],
-        )
+        await _send_transaction(t)
 
     with open("transactions.json", "w") as f:
         json.dump(TRANSACTIONS, f, indent=2)
+
+
+async def force_refresh_and_send_last():
+    tres = await _get_transactions()
+    if not tres:
+        return
+
+    TRANSACTIONS.clear()
+    TRANSACTIONS.extend(tres)
+    with open("transactions.json", "w") as f:
+        json.dump(TRANSACTIONS, f, indent=2)
+
+    await _send_transaction(TRANSACTIONS[0])
 
 
 async def poll_loop(interval_seconds: int = 10):
@@ -150,9 +149,25 @@ async def poll_loop(interval_seconds: int = 10):
         await asyncio.sleep(interval_seconds)
 
 
+async def handle_go(_request: web.Request) -> web.Response:
+    try:
+        await force_refresh_and_send_last()
+        return web.Response(text="ok")
+    except Exception as exc:
+        return web.Response(status=500, text=str(exc))
+
+
 async def main():
     handler = AsyncSocketModeHandler(app, SLACK_APP_TOKEN)
     asyncio.create_task(poll_loop())
+
+    web_app = web.Application()
+    web_app.router.add_get("/go", handle_go)
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", 3000).start()
+    print("Web server listening on :3000")
+
     await handler.start_async()
 
 
