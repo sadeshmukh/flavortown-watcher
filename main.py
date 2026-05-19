@@ -90,7 +90,9 @@ async def _send_transaction(t: dict, org: str):
     else:
         header_text = f"*NEW {trans_type}* - {date}"
 
-    context_text = f"By: *{user}* | <{href}|hcb> | <{hcbscan_href}|hcbscan>"
+    context_text = (
+        f"By: *{user}* | <{href}|hcb> | <{hcbscan_href}|hcbscan> | org: *{org}*"
+    )
     if is_supa_mega:
         context_text += " | pinging <!channel>"
 
