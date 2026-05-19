@@ -33,29 +33,35 @@ id, object, href, amount_cents (can be negative), memo, date, comments (??), tag
 },]
 """
 
-if not os.path.exists("transactions.json"):
-    with open("transactions.json", "w") as f:
-        json.dump([], f)
-
-if os.path.getsize("transactions.json") == 0:
-    with open("transactions.json", "w") as f:
-        json.dump([], f)
-
-TRANSACTIONS: list[dict] = json.load(open("transactions.json", "r"))
-
-ORG = os.getenv("ORG", "flavortown")
+ORGS: list[str] = [o.strip() for o in os.getenv("ORG", "flavortown").split(",") if o.strip()]
 
 
-async def _get_transactions() -> list[dict]:
+def _transactions_file(org: str) -> str:
+    return f"transactions_{org}.json"
+
+
+def _load_transactions(org: str) -> list[dict]:
+    path = _transactions_file(org)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        with open(path, "w") as f:
+            json.dump([], f)
+        return []
+    return json.load(open(path, "r"))
+
+
+TRANSACTIONS: dict[str, list[dict]] = {org: _load_transactions(org) for org in ORGS}
+
+
+async def _get_transactions(org: str) -> list[dict]:
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f"https://hcb.hackclub.com/api/v3/organizations/{ORG}/transactions"
+            f"https://hcb.hackclub.com/api/v3/organizations/{org}/transactions"
         ) as resp:
             data = await resp.json()
             return data
 
 
-async def _send_transaction(t: dict):
+async def _send_transaction(t: dict, org: str):
     memo = t.get("memo") or "—"
     amount_cents = t.get("amount_cents", 0)
     amount = amount_cents / 100
@@ -65,7 +71,7 @@ async def _send_transaction(t: dict):
     href = (
         f"https://hcb.hackclub.com/hcb/{tid.split('_')[1]}"
         if tid
-        else f"https://hcb.hackclub.com/{ORG}"
+        else f"https://hcb.hackclub.com/{org}"
     )
     hcbscan_href = f"https://hcbscan.3kh0.net/app/txn/{tid}" if tid else None
     trans_type = t.get("type", "").upper().replace("_", " ")  # type: ignore
@@ -107,47 +113,50 @@ async def _send_transaction(t: dict):
     )
 
 
-async def update_transactions():
-    tres = await _get_transactions()
+async def update_transactions(org: str):
+    txns = TRANSACTIONS[org]
+    tres = await _get_transactions(org)
     if not tres:
         return
 
-    if not TRANSACTIONS:
-        TRANSACTIONS.extend(tres)
-        json.dump(TRANSACTIONS, open("transactions.json", "w"), indent=2)
+    if not txns:
+        txns.extend(tres)
+        json.dump(txns, open(_transactions_file(org), "w"), indent=2)
         # return
 
     new_items: list[dict] = []
     for t in tres:
-        if t["id"] == TRANSACTIONS[0]["id"]:
+        if t["id"] == txns[0]["id"]:
             break
         new_items.append(t)
 
     for t in reversed(new_items):
-        TRANSACTIONS.insert(0, t)
-        await _send_transaction(t)
+        txns.insert(0, t)
+        await _send_transaction(t, org)
 
-    with open("transactions.json", "w") as f:
-        json.dump(TRANSACTIONS, f, indent=2)
+    with open(_transactions_file(org), "w") as f:
+        json.dump(txns, f, indent=2)
 
 
-async def force_refresh_and_send_last():
-    tres = await _get_transactions()
+async def force_refresh_and_send_last(org: str):
+    txns = TRANSACTIONS[org]
+    tres = await _get_transactions(org)
     if not tres:
         return
 
-    TRANSACTIONS.clear()
-    TRANSACTIONS.extend(tres)
-    with open("transactions.json", "w") as f:
-        json.dump(TRANSACTIONS, f, indent=2)
+    txns.clear()
+    txns.extend(tres)
+    with open(_transactions_file(org), "w") as f:
+        json.dump(txns, f, indent=2)
 
-    await _send_transaction(TRANSACTIONS[0])
+    await _send_transaction(txns[0], org)
 
 
 async def poll_loop(interval_seconds: int = 10):
     while True:
         try:
-            await update_transactions()
+            for org in ORGS:
+                await update_transactions(org)
         except Exception as exc:
             print(f"poll_loop error: {exc}")
         await asyncio.sleep(interval_seconds)
@@ -155,7 +164,8 @@ async def poll_loop(interval_seconds: int = 10):
 
 async def handle_go(_request: web.Request) -> web.Response:
     try:
-        await force_refresh_and_send_last()
+        for org in ORGS:
+            await force_refresh_and_send_last(org)
         return web.Response(text="ok")
     except Exception as exc:
         return web.Response(status=500, text=str(exc))
