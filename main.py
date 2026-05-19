@@ -33,7 +33,9 @@ id, object, href, amount_cents (can be negative), memo, date, comments (??), tag
 },]
 """
 
-ORGS: list[str] = [o.strip() for o in os.getenv("ORG", "flavortown").split(",") if o.strip()]
+ORGS: list[str] = [
+    o.strip() for o in os.getenv("ORG", "flavortown").split(",") if o.strip()
+]
 
 
 def _transactions_file(org: str) -> str:
@@ -78,10 +80,24 @@ async def _send_transaction(t: dict, org: str):
     user = t.get("user", {}).get("full_name", "???")
     imgfail = "https://images.rawpixel.com/image_png_800/cHJpdmF0ZS9sci9pbWFnZXMvd2Vic2l0ZS8yMDI0LTA0L3JtMTg4OS1lbGVtZW50LXotMzEucG5n.png"
 
+    is_supa_mega = amount_cents < 0 and abs(amount_cents) > 4_000_000
+    is_mega = amount_cents < 0 and abs(amount_cents) > 1_000_000
+
+    if is_supa_mega:
+        header_text = f"*NEW {trans_type} - SUPA MEGA PURCHASE* - {date}"
+    elif is_mega:
+        header_text = f"*NEW {trans_type} - MEGA PURCHASE* - {date}"
+    else:
+        header_text = f"*NEW {trans_type}* - {date}"
+
+    context_text = f"By: *{user}* | <{href}|hcb> | <{hcbscan_href}|hcbscan>"
+    if is_supa_mega:
+        context_text += " | pinging <!channel>"
+
     blocks = [
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*NEW {trans_type}* - {date}"},
+            "text": {"type": "mrkdwn", "text": header_text},
         },
         {
             "type": "section",
@@ -101,7 +117,7 @@ async def _send_transaction(t: dict, org: str):
                 },
                 {
                     "type": "mrkdwn",
-                    "text": f"By: *{user}* | <{href}|hcb> | <{hcbscan_href}|hcbscan>",
+                    "text": context_text,
                 },
             ],
         },
